@@ -3,6 +3,7 @@ const express = require("express");
 const app = express();
 
 function middleware(req, res, next) {
+  ; // SL no-op change
   console.log("Middleware called");
 }
 
