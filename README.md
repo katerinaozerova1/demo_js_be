@@ -1,5 +1,7 @@
 # demo_js_be
+
 Sample Express app used to demonstrate **SeaLights** Node.js onboarding in GitHub Actions. The workflow is already expected to live at `.github/workflows/` (for example `sealights-nodejs-onboarding.yml`).
+
 ---
 ## Step 1 — Repository and local setup
 
@@ -8,11 +10,13 @@ Sample Express app used to demonstrate **SeaLights** Node.js onboarding in GitHu
 **Is:** Onboard the **SeaLights Node.js agent** (`slnodejs`) so each manual CI run **creates a build**, **scans** the app, **runs a test session**, **starts the instrumented app** on the GitHub Actions runner, **drives HTTP smoke tests** against it, then **ends the session** so **results and coverage** show in the **SeaLights UI**.
 
 **Is not:** There is **no deployment** to a server, cluster, or cloud. The app runs **only** on the **CI VM** (`localhost:3000`). That is enough for SeaLights to collect **runtime coverage** for this build/session; you do **not** need a separate “deploy” step for that.
+
 ---
 ## 2. Prerequisites (one-time)
 ### SeaLights
 - An **application** registered in SeaLights (here: **`demo_js_be`**).
 - A valid **agent API token**; store it as **`SL_TOKEN`** in the repository **Settings → Secrets and variables → Actions**.
+
 ---
 ## 3. Repository and local setup
 1. **Clone** this repository and open it in your editor.
@@ -27,6 +31,7 @@ Sample Express app used to demonstrate **SeaLights** Node.js onboarding in GitHu
    The server listens on **port 3000** (see `index.js` / `app.listen`).
 4. **Workflow file**  
    You should already have the SeaLights GitHub Actions workflow committed under **`.github/workflows/`**. This README does not duplicate that file; it describes what you must configure in SeaLights and how the end-to-end run works.
+
 ---
 ## Step 4 (partial) — SeaLights only
 Complete these in **SeaLights** and **GitHub** before relying on the workflow for demos.
@@ -62,6 +67,7 @@ You start the workflow from the **Actions** tab (**workflow_dispatch**), and the
 - The **build** for `demo_js_be` on the **correct branch** and the **new build id**.
 - **Code Changes** — Should reflect the `__SL_DEMO_STAMP`-style edit in real code, not only comments.
 - **Coverage and test session** for the **Manual Tests** (or your named) stage, linked to that build session.
+
 ---
 ## Troubleshooting (short)
 | Symptom | What to check |
@@ -70,4 +76,3 @@ You start the workflow from the **Actions** tab (**workflow_dispatch**), and the
 | Code change missing in UI | Use **executable** code changes, not only `//` comments. |
 | Push fails | Branch protection may block bot pushes; adjust rules or use a token with rights to push. |
 | Port / health check fails | Confirm the app’s listen **port** matches the workflow (here **3000**) and that the stamped response is what the health check expects. |
----
