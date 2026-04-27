@@ -1,0 +1,174 @@
+# Copy to: .github/workflows/sealights-nodejs-onboarding.yml
+# Repository: https://github.com/katerinaozerova1/demo_js_be
+#
+# Manual run: workflow_dispatch. Commits a no-op line to index.js, pushes, then
+# config → scan → start test session → run instrumented app → HTTP smoke tests → end session.
+
+name: SeaLights NodeJS Onboarding
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sealights-onboarding-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  sealights:
+    runs-on: ubuntu-latest
+
+    env:
+      SL_TOKEN: ${{ secrets.SL_TOKEN }}
+
+    steps:
+      # ---------------------------------------
+      # Checkout
+      # ---------------------------------------
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      # ---------------------------------------
+      # Node & npm
+      # ---------------------------------------
+      - name: Setup Node.js 18.20.8
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18.20.8"
+
+      - name: Upgrade npm to 10.8.2
+        run: npm install -g npm@10.8.2
+
+      - name: Install npm dependencies
+        run: npm install
+
+      - name: Ensure SeaLights Node agent (slnodejs)
+        run: npm install slnodejs
+
+      # ---------------------------------------
+      # Non-operational change: commit + push (new build fingerprint for SL)
+      # Appends a timestamped comment so each run changes the file without behavior change.
+      # ---------------------------------------
+      - name: Add non-operational change and push
+        run: |
+          set -e
+          echo "" >> index.js
+          echo "// SeaLights CI no-op: $(date -u +%Y-%m-%dT%H:%M:%SZ) run_id=${{ github.run_id }}" >> index.js
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add index.js
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          git commit -m "chore: non-operational change for SeaLights (run ${{ github.run_id }})"
+          git push
+
+      # ---------------------------------------
+      # SeaLights: build + scan
+      # Use the branch the workflow runs on (usually main), not a hardcoded master.
+      # ---------------------------------------
+      - name: Initialize SeaLights build
+        run: |
+          npx slnodejs config \
+            --token "$SL_TOKEN" \
+            --appname "demo_js_be" \
+            --branch "${{ github.ref_name }}" \
+            --build "$(date +"%y%m%d_%H%M")"
+
+      - name: SeaLights scan
+        run: |
+          npx slnodejs scan \
+            --token "$SL_TOKEN" \
+            --buildsessionidfile "buildSessionId" \
+            --workspacepath "." \
+            --scm none \
+            --es6Modules
+
+      # ---------------------------------------
+      # Smoke test (Node 18+ built-in test runner) — created in CI, no repo change required
+      # ---------------------------------------
+      - name: Create HTTP smoke test
+        run: |
+          cat > smoke.test.mjs <<'EOF'
+          import { test } from "node:test";
+          import assert from "node:assert";
+          import http from "http";
+          function get (path) {
+            return new Promise((resolve, reject) => {
+              const req = http.get(
+                { hostname: "127.0.0.1", port: 3000, path, timeout: 10000 },
+                (res) => {
+                  let b = "";
+                  res.on("data", (c) => { b += c; });
+                  res.on("end", () => resolve({ status: res.statusCode, body: b }));
+                }
+              );
+              req.on("error", reject);
+              req.on("timeout", () => {
+                req.destroy();
+                reject(new Error("request timeout"));
+              });
+            });
+          }
+          test("GET / returns 200 and body contains Hello", async () => {
+            const { status, body } = await get("/");
+            assert.equal(status, 200);
+            assert.match(body, /Hello/);
+          });
+          EOF
+
+      # ---------------------------------------
+      # Test session: start → run instrumented app → run tests → end
+      # ---------------------------------------
+      - name: Start SeaLights test session
+        run: |
+          npx slnodejs start \
+            --token "$SL_TOKEN" \
+            --buildsessionidfile "buildSessionId" \
+            --teststage "Manual Tests"
+
+      - name: Run app under SeaLights and execute smoke tests
+        run: |
+          set -e
+          nohup npx slnodejs run \
+            --token "$SL_TOKEN" \
+            --buildsessionidfile "buildSessionId" \
+            -- index.js > app.log 2>&1 &
+          echo $! > app.pid
+          for i in $(seq 1 40); do
+            if curl -fsS "http://127.0.0.1:3000/" > /dev/null; then
+              echo "App is up"
+              break
+            fi
+            sleep 1
+            if [ "$i" -eq 40 ]; then
+              echo "App failed to start within 40s"
+              cat app.log || true
+              exit 1
+            fi
+          done
+          node --test smoke.test.mjs
+          echo "Smoke tests passed"
+
+      - name: End SeaLights test session
+        if: always()
+        run: |
+          npx slnodejs end \
+            --token "$SL_TOKEN" \
+            --buildsessionidfile "buildSessionId" || true
+
+      - name: Stop background app
+        if: always()
+        run: |
+          if [ -f app.pid ]; then
+            kill "$(cat app.pid)" 2>/dev/null || true
+          fi
+          pkill -f "slnodejs run" 2>/dev/null || true
+          pkill -f "node.*index" 2>/dev/null || true
+          echo "Stopped instrumented app"
