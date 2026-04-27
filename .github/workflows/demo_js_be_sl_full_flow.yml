@@ -1,10 +1,11 @@
 # Copy to: .github/workflows/sealights-nodejs-onboarding.yml
 # Repository: https://github.com/katerinaozerova1/demo_js_be
 #
-# Manual run: workflow_dispatch. Commits a no-op line to index.js, pushes, then
+# Manual run: workflow_dispatch. Injects a per-run string constant (not a comment) into
+# the request/response path so the file hash and SL "code change" views show real code.
 # config → scan → start test session → run instrumented app → HTTP smoke tests → end session.
 
-name: SeaLights NodeJS Onboarding Full Flow
+name: SeaLights NodeJS Onboarding
 
 on:
   workflow_dispatch:
@@ -51,14 +52,54 @@ jobs:
         run: npm install slnodejs
 
       # ---------------------------------------
-      # Non-operational change: commit + push (new build fingerprint for SL)
-      # Appends a timestamped comment so each run changes the file without behavior change.
+      # Operational (hash) change for SeaLights: real JS, not comments/whitespace
+      # SL UI often does not count comment-only or blank edits as a "code" change. We inject
+      # an executable const and reference it in middleware + GET / so the stamp is on a hot path.
+      # Repeats every run with a new value: runId_attempt (content hash still changes each run).
       # ---------------------------------------
-      - name: Add non-operational change and push
+      - name: Inject per-run build stamp into application code
         run: |
           set -e
-          echo "" >> index.js
-          echo "// SeaLights CI no-op: $(date -u +%Y-%m-%dT%H:%M:%SZ) run_id=${{ github.run_id }}" >> index.js
+          node <<'PATCH'
+          const fs = require("fs");
+          const path = "index.js";
+          const stamp = "run_${{ github.run_id }}_${{ github.run_attempt }}";
+          let s = fs.readFileSync(path, "utf8");
+          if (s.includes("__SL_DEMO_STAMP")) {
+            s = s.replace(
+              /const __SL_DEMO_STAMP = "[^"]*";/,
+              `const __SL_DEMO_STAMP = ${JSON.stringify(stamp)};`
+            );
+            console.log("Updated existing __SL_DEMO_STAMP for this run");
+          } else {
+            if (!s.includes("const app = express();")) {
+              console.error("index.js: expected 'const app = express();' — update the patcher");
+              process.exit(1);
+            }
+            s = s.replace(
+              "const app = express();",
+              `const app = express();\nconst __SL_DEMO_STAMP = ${JSON.stringify(stamp)};`
+            );
+            s = s.replace(
+              /res\.send\("Hello World!"\);/,
+              "res.send(\"Hello World! \" + __SL_DEMO_STAMP);"
+            );
+            s = s.replace(
+              /console\.log\("Middleware called"\);/,
+              "console.log(\"Middleware called\", __SL_DEMO_STAMP);"
+            );
+          }
+          if (!s.includes("__SL_DEMO_STAMP")) {
+            console.error("Patch did not apply — check index.js format.");
+            process.exit(1);
+          }
+          fs.writeFileSync(path, s);
+          PATCH
+          node -c index.js
+
+      - name: Commit and push build stamp
+        run: |
+          set -e
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add index.js
@@ -66,7 +107,7 @@ jobs:
             echo "No changes to commit"
             exit 0
           fi
-          git commit -m "chore: non-operational change for SeaLights (run ${{ github.run_id }})"
+          git commit -m "chore: SeaLights demo stamp in hot path (run ${{ github.run_id }})"
           git push
 
       # ---------------------------------------
@@ -95,10 +136,12 @@ jobs:
       # ---------------------------------------
       - name: Create HTTP smoke test
         run: |
+          # SL_EXPECT_STAMP is set on the "Run app" step when executing node --test
           cat > smoke.test.mjs <<'EOF'
           import { test } from "node:test";
           import assert from "node:assert";
           import http from "http";
+          const EXPECT = process.env.SL_EXPECT_STAMP || "";
           function get (path) {
             return new Promise((resolve, reject) => {
               const req = http.get(
@@ -116,10 +159,13 @@ jobs:
               });
             });
           }
-          test("GET / returns 200 and body contains Hello", async () => {
-            const { status, body } = await get("/");
-            assert.equal(status, 200);
-            assert.match(body, /Hello/);
+          test("GET / is 200 and body includes stamp (instrumented app)", async () => {
+            for (let r = 0; r < 3; r++) {
+              const { status, body } = await get("/");
+              assert.equal(status, 200, `attempt ${r + 1} status`);
+              assert.match(body, /Hello World!/, "response text");
+              if (EXPECT) assert.ok(body.includes(EXPECT), "response must include build stamp: " + EXPECT);
+            }
           });
           EOF
 
@@ -134,25 +180,39 @@ jobs:
             --teststage "Manual Tests"
 
       - name: Run app under SeaLights and execute smoke tests
+        env:
+          SL_EXPECT_STAMP: "run_${{ github.run_id }}_${{ github.run_attempt }}"
         run: |
           set -e
+          STAMP="run_${{ github.run_id }}_${{ github.run_attempt }}"
           nohup npx slnodejs run \
             --token "$SL_TOKEN" \
             --buildsessionidfile "buildSessionId" \
             -- index.js > app.log 2>&1 &
-          echo $! > app.pid
-          for i in $(seq 1 40); do
-            if curl -fsS "http://127.0.0.1:3000/" > /dev/null; then
-              echo "App is up"
+          echo $! > app.npx.pid
+          for i in $(seq 1 60); do
+            if OUT=$(curl -sS "http://127.0.0.1:3000/" 2>/dev/null) && \
+              echo "$OUT" | grep -q "Hello World" && \
+              echo "$OUT" | grep -qF "$STAMP"; then
+              echo "App responded with expected body (stamped, instrumented path)"
               break
             fi
-            sleep 1
-            if [ "$i" -eq 40 ]; then
-              echo "App failed to start within 40s"
-              cat app.log || true
+            if [ "$i" -eq 60 ]; then
+              echo "App failed health check; last app.log:"
+              tail -n 80 app.log 2>/dev/null || true
+              echo "curl (verbose, last lines):"
+              curl -sS "http://127.0.0.1:3000/" 2>&1 | head -c 500 || true
+              echo
+              (ss -tlnp 2>/dev/null || true) | grep 3000 || (netstat -tlnp 2>/dev/null | grep 3000) || true
               exit 1
             fi
+            sleep 1
           done
+          sleep 3
+          for _ in 1 2 3; do
+            curl -sS "http://127.0.0.1:3000/" > /dev/null
+          done
+          export SL_EXPECT_STAMP="${STAMP}"
           node --test smoke.test.mjs
           echo "Smoke tests passed"
 
@@ -166,9 +226,9 @@ jobs:
       - name: Stop background app
         if: always()
         run: |
-          if [ -f app.pid ]; then
-            kill "$(cat app.pid)" 2>/dev/null || true
+          if [ -f app.npx.pid ]; then
+            kill "$(cat app.npx.pid)" 2>/dev/null || true
           fi
           pkill -f "slnodejs run" 2>/dev/null || true
-          pkill -f "node.*index" 2>/dev/null || true
+          pkill -f "index.js" 2>/dev/null || true
           echo "Stopped instrumented app"
