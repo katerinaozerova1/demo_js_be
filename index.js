@@ -1,16 +1,17 @@
 const express = require("express");
 
 const app = express();
+const __SL_DEMO_STAMP = "run_25021921413_1";
 
 function middleware(req, res, next) {
   ; // SL no-op change
-  console.log("Middleware called");
+  console.log("Middleware called", __SL_DEMO_STAMP);
 }
 
 app.get("/", (req, res) => {
   middleware();
 
-  res.send("Hello World!");
+  res.send("Hello World! " + __SL_DEMO_STAMP);
 });
 
 app.listen(3000, () => {
