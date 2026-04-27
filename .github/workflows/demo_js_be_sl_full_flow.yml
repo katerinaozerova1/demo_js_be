@@ -4,7 +4,7 @@
 # Manual run: workflow_dispatch. Commits a no-op line to index.js, pushes, then
 # config → scan → start test session → run instrumented app → HTTP smoke tests → end session.
 
-name: SeaLights NodeJS Onboarding
+name: SeaLights NodeJS Onboarding Full Flow
 
 on:
   workflow_dispatch:
