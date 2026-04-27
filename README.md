@@ -2,9 +2,12 @@
 Sample Express app used to demonstrate **SeaLights** Node.js onboarding in GitHub Actions. The workflow is already expected to live at `.github/workflows/` (for example `sealights-nodejs-onboarding.yml`).
 ---
 ## Step 1 — Repository and local setup
-## 1. What this onboarding is (and is not)
+
+### 1. What this onboarding is (and is not)
+
 **Is:** Onboard the **SeaLights Node.js agent** (`slnodejs`) so each manual CI run **creates a build**, **scans** the app, **runs a test session**, **starts the instrumented app** on the GitHub Actions runner, **drives HTTP smoke tests** against it, then **ends the session** so **results and coverage** show in the **SeaLights UI**.
-**Is not:** There is **no deployment** to a server, cluster, or cloud. The app runs **only on the CI VM** (`localhost:3000`). That is enough for SeaLights to collect **runtime coverage** for this build/session; you do **not** need a separate “deploy” step for that.
+
+**Is not:** There is **no deployment** to a server, cluster, or cloud. The app runs **only** on the **CI VM** (`localhost:3000`). That is enough for SeaLights to collect **runtime coverage** for this build/session; you do **not** need a separate “deploy” step for that.
 ---
 ## 2. Prerequisites (one-time)
 ### SeaLights
@@ -36,7 +39,7 @@ Complete these in **SeaLights** and **GitHub** before relying on the workflow fo
 | **Node agent** | The workflow installs the **SeaLights Node.js agent** via **`slnodejs`** (`npm install slnodejs` / `npx slnodejs`). You do not install a separate “deployment” for coverage; the agent runs in CI next to your code. |
 No other SeaLights products are required for this minimal backend demo, as long as the token and app name align with the workflow.
 ---
-## Summary of sealights-nodejs-onboarding.yml — Full flow (one end-to-end explanation)
+## Summary of the full flow (one end-to-end explanation)
 You start the workflow from the **Actions** tab (**workflow_dispatch**), and the job performs the full pipeline below.
 ### Trigger
 1. In GitHub: **Actions** → select the SeaLights onboarding workflow → **Run workflow** → run on the intended branch (usually `main`).
