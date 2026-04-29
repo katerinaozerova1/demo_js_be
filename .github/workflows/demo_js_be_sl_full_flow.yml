@@ -177,7 +177,7 @@ jobs:
           npx slnodejs start \
             --token "$SL_TOKEN" \
             --buildsessionidfile "buildSessionId" \
-            --teststage "Manual Tests"
+            --teststage "Smoke Tests"
 
       - name: Run app under SeaLights and execute smoke tests
         env:
